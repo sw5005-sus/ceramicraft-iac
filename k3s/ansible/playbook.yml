@@ -7,7 +7,7 @@
     argocd_namespace: argocd
     unified_secret_name: unified-secrets
     unified_secret_file: secrets.env
-  environment:                         # ← 加这一行
+  environment:                         
       KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
   tasks:
@@ -73,48 +73,17 @@
           - "Admin user: admin"
           - "Admin password: {{ argo_pwd.stdout }}"
     # 6. apply apps-of-apps
-    - name: Copy app-of-apps.yaml to remote
+    - name: Copy root-app.yaml to remote
       copy:
-        src: "{{ playbook_dir }}/app-of-apps.yaml" 
-        dest: /tmp/app-of-apps.yaml
+        src: "{{ playbook_dir }}/root-app.yaml" 
+        dest: /tmp/root-app.yaml
         mode: '0644'
 
-    - name: Apply app-of-apps manifest
+    - name: Apply root-app manifest
       shell: |
-        kubectl apply -f /tmp/app-of-apps.yaml
+        kubectl apply -f /tmp/root-app.yaml
       register: app_result
     
     - name: install metric-server
       shell: |
         kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-    
-    - name: copy kafka.yml
-      copy:
-        src: "{{ playbook_dir }}/kafka.yaml" 
-        dest: /tmp/kafka.yaml
-        mode: '0644'
-    - name: apply kafka manifest
-      shell: |
-        kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
-        kubectl apply -f /tmp/kafka.yaml
-    
-    - name: copy loki.yml
-      copy:
-        src: "{{ playbook_dir }}/loki.yaml" 
-        dest: /tmp/loki.yaml
-        mode: '0644'
-    
-    - name: apply loki manifest
-      shell: |
-        kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
-        kubectl apply -f /tmp/loki.yaml
-    
-    - name: copy promtail.yml
-      copy:
-        src: "{{ playbook_dir }}/promtail.yaml" 
-        dest: /tmp/promtail.yaml
-        mode: '0644'
-    
-    - name: helm upgrade promtail
-      shell: |
-        helm upgrade --install promtail grafana/promtail -n monitoring -f /tmp/promtail.yaml

@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # delete root-app with its sub App
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/sw5005-sus/ceramicraft-argocd-deploy.git
+    targetRevision: HEAD
+    path: .   # root path，app-of-apps.yaml 
+    directory:
+      include: 'app-of-apps.yaml' # only entrance of all applications
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd # must be argocd namespace to manage other apps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
