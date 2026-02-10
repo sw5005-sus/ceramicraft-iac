@@ -16,3 +16,6 @@ terraform.tfstate.backup
 *.njsproj
 *.sln
 *.sw?
+
+# ignore ansible hosts file
+k3s/ansible/hosts

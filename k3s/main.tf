@@ -106,7 +106,7 @@ resource "aws_instance" "k3s" {
   key_name               = var.key_name
 #  user_data              = filebase64("${path.module}/userdata.sh")
   root_block_device {
-    volume_size = 40          # 给 Prometheus/ETCD 留空间
+    volume_size = 40          
     volume_type = "gp3"
   }
   tags = {
