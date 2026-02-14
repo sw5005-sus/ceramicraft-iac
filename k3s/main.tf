@@ -5,6 +5,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket         = "ceramicraft-terraform-state"
+    key            = "k3s/terraform.tfstate"
+    region         = "ap-southeast-1"
+    dynamodb_table = "terraform-lock"
+    encrypt        = true
+  }
 }
 
 provider "aws" { region = var.region }
@@ -39,9 +47,9 @@ resource "aws_subnet" "private" {
 # public route table
 resource "aws_route_table" "public" {
   vpc_id = var.vpc_id
-  route { 
+  route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = var.igw_id 
+    gateway_id = var.igw_id
   }
 }
 resource "aws_route_table_association" "public" {
@@ -81,6 +89,14 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
+  # Nginx NodePort
+  ingress {
+    from_port   = 30090
+    to_port     = 30090
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -101,17 +117,38 @@ data "aws_ami" "ubuntu" {
 resource "aws_instance" "k3s" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t3.medium"
-  subnet_id              = aws_subnet.private.id   
+  subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = [aws_security_group.k3s.id]
   key_name               = var.key_name
-#  user_data              = filebase64("${path.module}/userdata.sh")
+  #  user_data              = filebase64("${path.module}/userdata.sh")
   root_block_device {
-    volume_size = 40          
+    volume_size = 40
     volume_type = "gp3"
   }
   tags = {
-    Name = "k3s-demo"
-  }  
+    Name     = "k3s-demo"
+    AutoStop = "true"
+  }
+}
+
+resource "aws_instance" "k3s_worker" {
+  count                  = var.worker_count
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = "t3.small" # use small spec for worker
+  subnet_id              = aws_subnet.private.id
+  vpc_security_group_ids = [aws_security_group.k3s.id]
+  key_name               = var.key_name
+
+  tags = {
+    Name = "k3s-worker-${count.index}"
+  }
+}
+
+# assign eip for each worker
+resource "aws_eip" "worker_eip" {
+  count    = var.worker_count
+  domain   = "vpc"
+  instance = aws_instance.k3s_worker[count.index].id
 }
 
 resource "null_resource" "wait_ssh" {
@@ -130,12 +167,20 @@ resource "null_resource" "wait_ssh" {
 
 resource "null_resource" "ansible" {
   depends_on = [null_resource.wait_ssh]
+  triggers = {
+    worker_ids = join(",", aws_instance.k3s_worker[*].id)
+  }
 
   provisioner "local-exec" {
     command = <<-EOT
-      EIP=${aws_eip.k3s.public_ip}
-      echo "[k3s]" > ansible/hosts
-      echo "$EIP ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem argo_eip=$EIP" >> ansible/hosts
+      echo "[server]" > ansible/hosts
+      echo "${aws_eip.k3s.public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem" >> ansible/hosts
+      
+      echo "[agent]" >> ansible/hosts
+      %{for ip in aws_eip.worker_eip[*].public_ip~}
+      echo "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem" >> ansible/hosts
+      %{endfor~}
+      
       cd ansible && ansible-playbook -i hosts playbook.yml
     EOT
   }

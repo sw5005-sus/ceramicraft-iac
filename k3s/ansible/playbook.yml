@@ -1,15 +1,7 @@
 ---
-- name: Bootstrap k3s + helm + argocd + unified secret
+- name: Bootstrap k3s
   hosts: all
   become: false
-  vars:
-    k3s_version: v1.32.0+k3s1
-    argocd_namespace: argocd
-    unified_secret_name: unified-secrets
-    unified_secret_file: secrets.env
-  environment:                         
-      KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-
   tasks:
     # 1. install k3s（single node）
     - name: Download k3s install script
@@ -18,12 +10,30 @@
         dest: /tmp/k3s-install.sh
         mode: "0755"
 
-    - name: Install k3s server
+- name: Configure k3s server
+  hosts: server
+  become: false
+  vars:
+    k3s_version: v1.32.0+k3s1
+    argocd_namespace: argocd
+    unified_secret_name: unified-secrets
+    unified_secret_file: secrets.env
+  environment:
+      KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+   # install k3s server
+    - name: Install k3s server(idempotent)
       shell: /tmp/k3s-install.sh
       environment:
         INSTALL_K3S_VERSION: "{{ k3s_version }}"
         INSTALL_K3S_EXEC: "--write-kubeconfig-mode 644"
 
+    - name: Get K3S Cluster Token
+      become: true
+      shell: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+      changed_when: false
+    
     # 2. install helm
     - name: Get helm install script
       get_url:
@@ -50,29 +60,30 @@
         stdin: "{{ secret_b64.content | b64decode }}"
 
     # 4. install argocd
+    - name: Check if ArgoCD is already installed
+      shell: kubectl get ns {{ argocd_namespace }}
+      register: argocd_check
+      ignore_errors: true
+      changed_when: false
     - name: Add argo helm repo
       shell: helm repo add argo https://argoproj.github.io/argo-helm
+      when: argocd_check.rc != 0
     - name: Template ArgoCD values
       template:
         src: argocd-nodeport.yaml
         dest: /tmp/argocd-values.yaml
+      when: argocd_check.rc != 0
     - name: Install/upgrade argocd
       shell: |
         helm upgrade --install argocd argo/argo-cd \
         -n {{ argocd_namespace }} --create-namespace \
-        -f /tmp/argocd-values.yaml --wait
-    # 5. obtain argocd initial password & ip
-    - name: Decode admin password
-      shell: |
-        kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret \
-        --template={{ "{{" }}.data.password{{ "}}" }} | base64 -d
-      register: argo_pwd
-    - name: Print ArgoCD access info
-      debug:
-        msg:
-          - "Admin user: admin"
-          - "Admin password: {{ argo_pwd.stdout }}"
-    # 6. apply apps-of-apps
+        -f /tmp/argocd-values.yaml \
+        --set repoServer.livenessProbe.initialDelaySeconds=60 \
+        --set repoServer.livenessProbe.periodSeconds=10 \
+        --set repoServer.readinessProbe.initialDelaySeconds=60 \
+        --wait
+      when: argocd_check.rc != 0
+    # 5. bootstrap root app (root-app.yaml)
     - name: Copy root-app.yaml to remote
       copy:
         src: "{{ playbook_dir }}/root-app.yaml" 
@@ -87,3 +98,19 @@
     - name: install metric-server
       shell: |
         kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+- name: Configure K3s Agents
+  hosts: agent
+  become: false
+  vars:
+    k3s_version: v1.32.0+k3s1
+    server_ip: "{{ hostvars[groups['server'][0]]['inventory_hostname'] }}"
+    token: "{{ hostvars[groups['server'][0]]['k3s_token']['stdout'] }}"
+  tasks:
+    - name: Install k3s agent and join cluster
+      become: true
+      shell: /tmp/k3s-install.sh
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+        K3S_URL: "https://{{ server_ip }}:6443"
+        K3S_TOKEN: "{{ token }}"

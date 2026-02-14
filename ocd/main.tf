@@ -17,7 +17,7 @@ data "aws_vpc" "default" {
 
 data "aws_ami" "amazon_linux" {
   most_recent = true
-  owners       = ["amazon"]
+  owners      = ["amazon"]
 
   filter {
     name   = "name"
@@ -79,8 +79,8 @@ resource "aws_instance" "app" {
   key_name                    = var.key_name
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    repo_url    = var.repo_url
-    repo_branch = var.repo_branch
+    repo_url     = var.repo_url
+    repo_branch  = var.repo_branch
     compose_path = var.compose_path
     repo_dir     = var.repo_dir
   })
