@@ -31,6 +31,14 @@ jobs:
       - name: Terraform Plan (Validation)
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         run: terraform plan
+      - name: Prepare Secrets for Ansible
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # restore .pem credential file for local-exec use
+          echo "${{ secrets.EC2_SSH_KEY }}" > ./${{ vars.KEY_NAME }}.pem
+          chmod 600 ./${{ vars.KEY_NAME }}.pem
+          # restore secret file for ansible
+          echo "${{ secrets.UNIFIED_SECRETS_CONTENT }}" > ./ansible/secrets.env
 
       - name: Terraform Apply
         # apply only on main branch or when manually triggered, prevent apply on PRs

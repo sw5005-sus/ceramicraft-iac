@@ -89,6 +89,14 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
+  # Nginx NodePort
+  ingress {
+    from_port   = 30090
+    to_port     = 30090
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+  
   egress {
     from_port   = 0
     to_port     = 0
@@ -123,6 +131,26 @@ resource "aws_instance" "k3s" {
   }  
 }
 
+resource "aws_instance" "k3s_worker" {
+  count                  = var.worker_count
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = "t3.small" # use small spec for worker
+  subnet_id              = aws_subnet.private.id
+  vpc_security_group_ids = [aws_security_group.k3s.id]
+  key_name               = var.key_name
+
+  tags = {
+    Name = "k3s-worker-${count.index}"
+  }
+}
+
+# assign eip for each worker
+resource "aws_eip" "worker_eip" {
+  count    = var.worker_count
+  domain   = "vpc"
+  instance = aws_instance.k3s_worker[count.index].id
+}
+
 resource "null_resource" "wait_ssh" {
   depends_on = [aws_instance.k3s, aws_eip.k3s]
 
@@ -139,12 +167,20 @@ resource "null_resource" "wait_ssh" {
 
 resource "null_resource" "ansible" {
   depends_on = [null_resource.wait_ssh]
+  triggers = {
+    worker_ids = join(",", aws_instance.k3s_worker[*].id)
+  }
 
   provisioner "local-exec" {
     command = <<-EOT
-      EIP=${aws_eip.k3s.public_ip}
-      echo "[k3s]" > ansible/hosts
-      echo "$EIP ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem argo_eip=$EIP" >> ansible/hosts
+      echo "[server]" > ansible/hosts
+      echo "${aws_eip.k3s.public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem" >> ansible/hosts
+      
+      echo "[agent]" >> ansible/hosts
+      %{ for ip in aws_eip.worker_eip[*].public_ip ~}
+      echo "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem" >> ansible/hosts
+      %{ endfor ~}
+      
       cd ansible && ansible-playbook -i hosts playbook.yml
     EOT
   }
