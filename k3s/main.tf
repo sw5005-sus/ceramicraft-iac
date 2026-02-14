@@ -5,6 +5,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket         = "ceramicraft-terraform-state"
+    key            = "k3s/terraform.tfstate"
+    region         = "ap-southeast-1"
+    dynamodb_table = "terraform-lock"
+    encrypt        = true
+  }
 }
 
 provider "aws" { region = var.region }
@@ -111,6 +119,7 @@ resource "aws_instance" "k3s" {
   }
   tags = {
     Name = "k3s-demo"
+    AutoStop = "true"
   }  
 }
 

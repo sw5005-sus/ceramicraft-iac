@@ -72,7 +72,7 @@
         msg:
           - "Admin user: admin"
           - "Admin password: {{ argo_pwd.stdout }}"
-    # 6. apply apps-of-apps
+    # 6. bootstrap root app (root-app.yaml)
     - name: Copy root-app.yaml to remote
       copy:
         src: "{{ playbook_dir }}/root-app.yaml" 
