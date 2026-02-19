@@ -1,0 +1,158 @@
+---
+- name: Install Step CLI on All nodePortHttps
+  hosts: all
+  become: true
+  vars:
+    step_version: "0.24.4"
+    step_arch: "amd64"
+  tasks:
+    - name: Download Step CLI tarball
+      get_url:
+        url: "https://github.com/smallstep/cli/releases/download/v{{ step_version }}/step_linux_{{ step_version }}_{{ step_arch }}.tar.gz"
+        dest: "/tmp/step.tar.gz"
+        mode: '0600'
+
+    - name: Extract step binary to /usr/local/bin
+      unarchive:
+        src: "/tmp/step.tar.gz"
+        dest: "/usr/local/bin"
+        remote_src: yes
+        # --strip-components=2 : extract binary to /usr/local/bin directly, without intermediate folders
+        extra_opts:
+          - "--strip-components=2"
+          - "step_{{ step_version }}/bin/step"
+        creates: "/usr/local/bin/step" # skip if already exists
+
+    - name: Verify step installation
+      command: step version
+      register: step_v
+      changed_when: false
+      failed_when: step_v.rc != 0
+
+- name: Prepare Linkerd mTLS Secrets
+  hosts: masters
+  become: true
+  vars:
+    cert_dir: "/etc/linkerd-certs"
+  
+  tasks:
+    - name: Check if Linkerd CRDs are already installed
+      shell: "kubectl get crd serviceprofiles.linkerd.io"
+      register: crd_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install Linkerd CRDs if missing
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      shell: |
+        helm repo add linkerd https://helm.linkerd.io/stable
+        helm repo update
+        helm template linkerd-crds linkerd/linkerd-crds --version 1.8.0 | kubectl apply -f -
+      when: crd_check.rc != 0
+      register: crd_install
+      changed_when: "'created' in crd_install.stdout"
+
+    - name: Wait for CRDs to be established
+      shell: "kubectl wait --for condition=established --timeout=60s crd/serviceprofiles.linkerd.io"
+      when: crd_check.rc != 0
+      changed_when: false
+
+    - name: Ensure cert directory has correct permissions
+      file:
+        path: "{{ cert_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      become: true
+
+    - name: Generate Trust Anchor (Root CA)
+      command: >
+        step certificate create identity.linkerd.cluster.local {{ cert_dir }}/ca.crt {{ cert_dir }}/ca.key
+        --profile root-ca --no-password --insecure
+      args:
+        creates: "{{ cert_dir }}/ca.crt"
+
+    - name: Generate Issuer Certificate
+      command: >
+        step certificate create identity.linkerd.cluster.local {{ cert_dir }}/issuer.crt {{ cert_dir }}/issuer.key
+        --ca {{ cert_dir }}/ca.crt --ca-key {{ cert_dir }}/ca.key
+        --profile intermediate-ca --not-after 8760h --no-password --insecure
+        creates: "{{ cert_dir }}/issuer.crt"
+
+    - name: Create Linkerd Namespace
+      shell: "kubectl create ns linkerd --dry-run=client -o yaml | kubectl apply -f - "
+
+    - name: Inject Secret into Kubernetes
+      shell: |
+        kubectl create secret generic linkerd-identity-issuer \
+        --namespace=linkerd \
+        --from-file=tls.crt={{ cert_dir }}/issuer.crt \
+        --from-file=tls.key={{ cert_dir }}/issuer.key \
+        --from-file=ca.crt={{ cert_dir }}/ca.crt \
+        --type=kubernetes.io/tls \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Label default namespace for Linkerd injection
+      shell: "kubectl label ns default linkerd.io/inject=enabled --overwrite"
+      changed_when: false
+
+- name: Get Cert from Master
+  hosts: masters
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Fetch CA content
+      ansible.builtin.slurp:
+        src: "/etc/linkerd-certs/ca.crt"
+      register: remote_ca_file
+
+    - name: Save CA to a dummy host for later use
+      add_host:
+        name: "CERT_HOLDER"
+        ca_content: "{{ remote_ca_file.content }}"
+
+- name: Update GitOps Repository with new CA
+  hosts: localhost  
+  connection: local
+  gather_facts: false
+  vars:
+    gitops_repo_url: "https://{{ lookup('env', 'GH_TOKEN') }}@github.com/sw5005-sus/ceramicraft-argocd-deploy.git"
+    temp_dir: "/tmp/gitops-sync"
+    app_yaml_path: "{{ temp_dir }}/app-of-apps.yaml"
+
+  tasks:
+    - name: Clone GitOps Repository
+      git:
+        repo: "{{ gitops_repo_url }}"
+        dest: "{{ temp_dir }}"
+        depth: 1
+        force: yes
+      no_log: true
+
+    - name: Replace cert content
+      ansible.builtin.replace:
+        path: "{{ temp_dir }}/app-of-apps.yaml"
+        # 正则解释：
+        # (?<=# BEGIN ANSIBLE MANAGED CERT) : forward assert, match content after this marker
+        # [\s\S]*? : match all characters (including newlines) non-greedily until the next part
+        # (?=# END ANSIBLE MANAGED CERT) : backward assert, match content before this marker
+        regexp: '(?<=# BEGIN ANSIBLE MANAGED CERT)[\s\S]*?(?=# END ANSIBLE MANAGED CERT)'
+        replace: "\n{{ (hostvars['CERT_HOLDER']['ca_content'] | b64decode | trim) | indent(10, first=True) }}\n          "
+
+    - name: Commit and Push changes
+      shell: |
+        cd {{ temp_dir }}
+        git config user.name "Ansible Automation"
+        git config user.email "ansible@ceramicraft.local"
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "Changes detected, committing..."
+          git add .
+          git commit -m "chore: auto-update linkerd trust anchor [skip ci]"
+          git push
+        else
+          echo "No changes in ca.crt, skipping commit."
+        fi
+      register: git_push_result
+      changed_when: "'Changes detected' in git_push_result.stdout"

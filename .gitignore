@@ -19,3 +19,4 @@ terraform.tfstate.backup
 
 # ignore ansible hosts file
 k3s/ansible/hosts
+k3s/ansible/inventory.ini

@@ -68,6 +68,13 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
+  # traefik port
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
   # k3s API
   ingress {
     from_port   = 6443
@@ -120,7 +127,8 @@ resource "aws_instance" "k3s" {
   subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = [aws_security_group.k3s.id]
   key_name               = var.key_name
-  #  user_data              = filebase64("${path.module}/userdata.sh")
+  iam_instance_profile   = "EC2-S3-Role"
+
   root_block_device {
     volume_size = 40
     volume_type = "gp3"
@@ -138,6 +146,7 @@ resource "aws_instance" "k3s_worker" {
   subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = [aws_security_group.k3s.id]
   key_name               = var.key_name
+  iam_instance_profile   = "EC2-S3-Role"
 
   tags = {
     Name = "k3s-worker-${count.index}"
@@ -198,4 +207,21 @@ resource "null_resource" "show_pwd" {
   provisioner "local-exec" {
     command = "echo ArgoCD admin password: $(ssh -o StrictHostKeyChecking=no -i ${var.key_name}.pem ubuntu@${aws_eip.k3s.public_ip} 'cat /tmp/argocd-pass')"
   }
+}
+
+resource "local_file" "ansible_inventory" {
+  content  = <<EOT
+[masters]
+${aws_eip.k3s.public_ip} ansible_user=ubuntu
+
+[workers]
+%{for ip in aws_eip.worker_eip[*].public_ip~}
+${ip} ansible_user=ubuntu
+%{endfor~}
+
+[all:vars]
+ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem
+ansible_python_interpreter=/usr/bin/python3
+EOT
+  filename = "${path.module}/ansible/inventory.ini"
 }
