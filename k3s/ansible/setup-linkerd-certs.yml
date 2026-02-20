@@ -31,6 +31,8 @@
 
 - name: Install cert-manager
   hosts: masters
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   tasks:
     - name: Add cert-manager helm repo
       kubernetes.core.helm_repository:
@@ -41,15 +43,22 @@
       kubernetes.core.helm:
         name: cert-manager
         release_namespace: cert-manager
-        chart_ref: jetstack/cert-manager
-        chart_version: "v1.13.0" 
+        chart_ref: cert-manager
+        chart_repo_url: "https://charts.jetstack.io"
+        chart_version: "v1.16.1"
         create_namespace: true
-        set_values:
-          - value: installCRDs=true
-
+        release_values:
+          installCRDs: true
+    - name: Wait for cert-manager components to be ready
+      shell: |
+        kubectl wait --for=condition=available --timeout=300s deployment/cert-manager -n cert-manager
+        kubectl wait --for=condition=available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+      changed_when: false
 - name: Prepare Linkerd mTLS Secrets
   hosts: masters
   become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   vars:
     cert_dir: "/etc/linkerd-certs"
   
@@ -65,7 +74,20 @@
         group: root
         mode: '0700'
       become: true
-      
+    
+    - name: Install pip3 on Ubuntu/Debian
+      become: true
+      ansible.builtin.apt:
+        name: python3-pip
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Python kubernetes library
+      become: true
+      ansible.builtin.pip:
+        name: ["kubernetes", "PyYAML", "jsonpatch"]
+
     - name: Generate Trust Anchor (Root CA)
       command: >
         step certificate create identity.linkerd.cluster.local {{ cert_dir }}/ca.crt {{ cert_dir }}/ca.key
@@ -76,13 +98,15 @@
     - name: Create Secret for Root CA (Input for cert-manager)
       shell: |
         kubectl create secret tls linkerd-trust-anchor-source \
-          -n cert-manager \
+          -n linkerd \
           --cert={{ cert_dir }}/ca.crt \
           --key={{ cert_dir }}/ca.key \
           --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Define cert-manager Issuer for Linkerd
       kubernetes.core.k8s:
+        state: present
+        wait: yes
         definition:
           apiVersion: cert-manager.io/v1
           kind: Issuer
@@ -95,6 +119,8 @@
     
     - name: Define Certificate for Linkerd Identity Issuer
       kubernetes.core.k8s:
+        state: present
+        wait: yes
         definition:
           apiVersion: cert-manager.io/v1
           kind: Certificate
@@ -103,18 +129,18 @@
             namespace: linkerd
           spec:
             secretName: linkerd-identity-issuer
-            duration: 48h
-            renewBefore: 24h
+            duration: 720h
+            renewBefore: 360h
             issuerRef:
               name: linkerd-trust-anchor
               kind: Issuer
             commonName: identity.linkerd.cluster.local
+            dnsNames:
+              - identity.linkerd.cluster.local
             isCA: true
             usages:
               - cert sign
               - crl sign
-              - digital signature
-              - key encipherment
 
     - name: Check if Linkerd CRDs are already installed
       shell: "kubectl get crd serviceprofiles.linkerd.io"
@@ -123,8 +149,6 @@
       changed_when: false
 
     - name: Install Linkerd CRDs if missing
-      environment:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
       shell: |
         helm repo add linkerd https://helm.linkerd.io/stable
         helm repo update
