@@ -29,6 +29,24 @@
       changed_when: false
       failed_when: step_v.rc != 0
 
+- name: Install cert-manager
+  hosts: masters
+  tasks:
+    - name: Add cert-manager helm repo
+      kubernetes.core.helm_repository:
+        name: jetstack
+        repo_url: "https://charts.jetstack.io"
+
+    - name: Install cert-manager via Helm
+      kubernetes.core.helm:
+        name: cert-manager
+        release_namespace: cert-manager
+        chart_ref: jetstack/cert-manager
+        chart_version: "v1.13.0" 
+        create_namespace: true
+        set_values:
+          - value: installCRDs=true
+
 - name: Prepare Linkerd mTLS Secrets
   hosts: masters
   become: true
@@ -36,6 +54,68 @@
     cert_dir: "/etc/linkerd-certs"
   
   tasks:
+    - name: Create Linkerd Namespace
+      shell: "kubectl create ns linkerd --dry-run=client -o yaml | kubectl apply -f - "
+    
+    - name: Ensure cert directory has correct permissions
+      file:
+        path: "{{ cert_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      become: true
+      
+    - name: Generate Trust Anchor (Root CA)
+      command: >
+        step certificate create identity.linkerd.cluster.local {{ cert_dir }}/ca.crt {{ cert_dir }}/ca.key
+        --profile root-ca --no-password --insecure
+      args:
+        creates: "{{ cert_dir }}/ca.crt"
+
+    - name: Create Secret for Root CA (Input for cert-manager)
+      shell: |
+        kubectl create secret tls linkerd-trust-anchor-source \
+          -n cert-manager \
+          --cert={{ cert_dir }}/ca.crt \
+          --key={{ cert_dir }}/ca.key \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Define cert-manager Issuer for Linkerd
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: cert-manager.io/v1
+          kind: Issuer
+          metadata:
+            name: linkerd-trust-anchor
+            namespace: linkerd
+          spec:
+            ca:
+              secretName: linkerd-trust-anchor-source
+    
+    - name: Define Certificate for Linkerd Identity Issuer
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: linkerd-identity-issuer
+            namespace: linkerd
+          spec:
+            secretName: linkerd-identity-issuer
+            duration: 48h
+            renewBefore: 24h
+            issuerRef:
+              name: linkerd-trust-anchor
+              kind: Issuer
+            commonName: identity.linkerd.cluster.local
+            isCA: true
+            usages:
+              - cert sign
+              - crl sign
+              - digital signature
+              - key encipherment
+
     - name: Check if Linkerd CRDs are already installed
       shell: "kubectl get crd serviceprofiles.linkerd.io"
       register: crd_check
@@ -57,42 +137,6 @@
       shell: "kubectl wait --for condition=established --timeout=60s crd/serviceprofiles.linkerd.io"
       when: crd_check.rc != 0
       changed_when: false
-
-    - name: Ensure cert directory has correct permissions
-      file:
-        path: "{{ cert_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: '0700'
-      become: true
-
-    - name: Generate Trust Anchor (Root CA)
-      command: >
-        step certificate create identity.linkerd.cluster.local {{ cert_dir }}/ca.crt {{ cert_dir }}/ca.key
-        --profile root-ca --no-password --insecure
-      args:
-        creates: "{{ cert_dir }}/ca.crt"
-
-    - name: Generate Issuer Certificate
-      command: >
-        step certificate create identity.linkerd.cluster.local {{ cert_dir }}/issuer.crt {{ cert_dir }}/issuer.key
-        --ca {{ cert_dir }}/ca.crt --ca-key {{ cert_dir }}/ca.key
-        --profile intermediate-ca --not-after 8760h --no-password --insecure
-        creates: "{{ cert_dir }}/issuer.crt"
-
-    - name: Create Linkerd Namespace
-      shell: "kubectl create ns linkerd --dry-run=client -o yaml | kubectl apply -f - "
-
-    - name: Inject Secret into Kubernetes
-      shell: |
-        kubectl create secret generic linkerd-identity-issuer \
-        --namespace=linkerd \
-        --from-file=tls.crt={{ cert_dir }}/issuer.crt \
-        --from-file=tls.key={{ cert_dir }}/issuer.key \
-        --from-file=ca.crt={{ cert_dir }}/ca.crt \
-        --type=kubernetes.io/tls \
-        --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Label default namespace for Linkerd injection
       shell: "kubectl label ns default linkerd.io/inject=enabled --overwrite"
@@ -134,7 +178,7 @@
     - name: Replace cert content
       ansible.builtin.replace:
         path: "{{ temp_dir }}/app-of-apps.yaml"
-        # 正则解释：
+        # regex explain：
         # (?<=# BEGIN ANSIBLE MANAGED CERT) : forward assert, match content after this marker
         # [\s\S]*? : match all characters (including newlines) non-greedily until the next part
         # (?=# END ANSIBLE MANAGED CERT) : backward assert, match content before this marker
