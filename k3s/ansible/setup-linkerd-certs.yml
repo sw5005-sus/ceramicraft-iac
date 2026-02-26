@@ -129,6 +129,9 @@
             namespace: linkerd
           spec:
             secretName: linkerd-identity-issuer
+            privateKey:
+              algorithm: ECDSA
+              size: 256
             duration: 720h
             renewBefore: 360h
             issuerRef:

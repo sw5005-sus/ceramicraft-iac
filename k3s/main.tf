@@ -130,9 +130,15 @@ resource "aws_instance" "k3s" {
   iam_instance_profile   = "EC2-S3-Role"
 
   root_block_device {
-    volume_size = 40
+    volume_size = 20
     volume_type = "gp3"
   }
+
+  lifecycle {
+    create_before_destroy = true
+    prevent_destroy       = false # 如果你想让 terraform apply 顺利运行，这里先设为 false
+  }
+
   tags = {
     Name     = "k3s-demo"
     AutoStop = "true"
@@ -177,11 +183,13 @@ resource "null_resource" "wait_ssh" {
 resource "null_resource" "ansible" {
   depends_on = [null_resource.wait_ssh]
   triggers = {
+    server_id  = aws_instance.k3s.id
     worker_ids = join(",", aws_instance.k3s_worker[*].id)
   }
 
   provisioner "local-exec" {
     command = <<-EOT
+      export ANSIBLE_HOST_KEY_CHECKING=False
       echo "[server]" > ansible/hosts
       echo "${aws_eip.k3s.public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem" >> ansible/hosts
       
