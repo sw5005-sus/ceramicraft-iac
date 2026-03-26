@@ -68,10 +68,17 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
-  # traefik port
+  # traefik HTTP port
   ingress {
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+  # traefik HTTPS port
+  ingress {
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
@@ -189,7 +196,6 @@ resource "null_resource" "ansible" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      export ANSIBLE_HOST_KEY_CHECKING=False
       echo "[server]" > ansible/hosts
       echo "${aws_eip.k3s.public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=${path.cwd}/${var.key_name}.pem" >> ansible/hosts
       
