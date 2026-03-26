@@ -82,6 +82,14 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
+
+  # in-cluster communication
+  ingress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    self      = true
+  }
   # k3s API
   ingress {
     from_port   = 6443
@@ -143,7 +151,7 @@ resource "aws_instance" "k3s" {
 
   lifecycle {
     create_before_destroy = true
-    prevent_destroy       = false # 如果你想让 terraform apply 顺利运行，这里先设为 false
+    ignore_changes        = [ami]
   }
 
   tags = {
@@ -163,6 +171,9 @@ resource "aws_instance" "k3s_worker" {
 
   tags = {
     Name = "k3s-worker-${count.index}"
+  }
+  lifecycle {
+    ignore_changes = [ami]
   }
 }
 

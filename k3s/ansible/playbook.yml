@@ -104,7 +104,7 @@
   become: false
   vars:
     k3s_version: v1.32.0+k3s1
-    server_ip: "{{ hostvars[groups['server'][0]]['inventory_hostname'] }}"
+    server_ip: "{{ hostvars[groups['server'][0]]['ansible_default_ipv4']['address'] }}"
     token: "{{ hostvars[groups['server'][0]]['k3s_token']['stdout'] }}"
   tasks:
     - name: Install k3s agent and join cluster
