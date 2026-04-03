@@ -118,6 +118,13 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
+  # tailscale NodePort
+  ingress {
+    from_port       = 41641
+    to_port         = 41641
+    protocol        = "udp"
+    security_groups = [var.default_sg]
+  }
 
   egress {
     from_port   = 0
