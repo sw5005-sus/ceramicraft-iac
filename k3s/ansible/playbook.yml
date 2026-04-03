@@ -43,23 +43,7 @@
     - name: Run helm install
       shell: /tmp/get-helm.sh
 
-    # 3. create secret
-    - name: Read local k/v file
-      slurp:
-        src: "{{ unified_secret_file }}"
-      register: secret_b64
-      delegate_to: localhost
-
-    - name: Apply unified secret from local env file
-      shell: |
-        kubectl create secret generic ms-secret \
-          --from-env-file=/dev/stdin \
-          --dry-run=client -o yaml \
-        | kubectl apply -f -
-      args:
-        stdin: "{{ secret_b64.content | b64decode }}"
-
-    # 4. install argocd
+    # 3. install argocd
     - name: Check if ArgoCD is already installed
       shell: kubectl get ns {{ argocd_namespace }}
       register: argocd_check
@@ -83,18 +67,20 @@
         --set repoServer.readinessProbe.initialDelaySeconds=60 \
         --wait
       when: argocd_check.rc != 0
-    # 5. bootstrap root app (root-app.yaml)
+    # 4. bootstrap root app (root-app.yaml)
     - name: Copy root-app.yaml to remote
       copy:
         src: "{{ playbook_dir }}/root-app.yaml" 
         dest: /tmp/root-app.yaml
         mode: '0644'
 
+    # 5. apply root app manifest
     - name: Apply root-app manifest
       shell: |
         kubectl apply -f /tmp/root-app.yaml
       register: app_result
     
+    # 6. install metric-server
     - name: install metric-server
       shell: |
         kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml

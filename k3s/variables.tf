@@ -5,3 +5,5 @@ variable "key_name" { default = "github-ec2" }                # pre-generated Ke
 variable "my_ip" { default = "0.0.0.0/0" }                    # only for experiment
 variable "igw_id" { default = "igw-06513106b987fb409" }       # pre-generated
 variable "worker_count" { default = 0 }
+variable "default_sg" { default = "sg-0437106d348788525" } # default ec2 security group
+
