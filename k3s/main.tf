@@ -111,13 +111,6 @@ resource "aws_security_group" "k3s" {
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
-  # Nginx NodePort
-  ingress {
-    from_port   = 30090
-    to_port     = 30090
-    protocol    = "tcp"
-    cidr_blocks = [var.my_ip]
-  }
   # tailscale NodePort
   ingress {
     from_port       = 41641
@@ -152,7 +145,7 @@ resource "aws_instance" "k3s" {
   iam_instance_profile   = "EC2-S3-Role"
 
   root_block_device {
-    volume_size = 20
+    volume_size = 30
     volume_type = "gp3"
   }
 
@@ -170,11 +163,16 @@ resource "aws_instance" "k3s" {
 resource "aws_instance" "k3s_worker" {
   count                  = var.worker_count
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t3.small" # use small spec for worker
+  instance_type          = "t3.medium"
   subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = [aws_security_group.k3s.id]
   key_name               = var.key_name
   iam_instance_profile   = "EC2-S3-Role"
+
+  root_block_device {
+    volume_size = 30
+    volume_type = "gp3"
+  }
 
   tags = {
     Name = "k3s-worker-${count.index}"

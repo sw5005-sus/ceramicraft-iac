@@ -92,7 +92,18 @@
     k3s_version: v1.32.0+k3s1
     server_ip: "{{ hostvars[groups['server'][0]]['ansible_default_ipv4']['address'] }}"
     token: "{{ hostvars[groups['server'][0]]['k3s_token']['stdout'] }}"
+    tailscale_auth_key: "{{ lookup('env', 'TAILSCALE_AUTH_KEY') }}"
   tasks:
+    - name: Install Tailscale
+      become: true
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+
+    - name: Start Tailscale and Authenticate
+      become: true
+      shell: tailscale up --authkey={{ tailscale_auth_key }} --reset
+      register: tailscale_start
+      changed_when: "'Success' in tailscale_start.stdout"
+
     - name: Install k3s agent and join cluster
       become: true
       shell: /tmp/k3s-install.sh
