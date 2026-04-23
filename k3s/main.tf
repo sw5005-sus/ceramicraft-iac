@@ -145,7 +145,7 @@ resource "aws_instance" "k3s" {
   iam_instance_profile   = "EC2-S3-Role"
 
   root_block_device {
-    volume_size = 20
+    volume_size = 30
     volume_type = "gp3"
   }
 
@@ -170,7 +170,7 @@ resource "aws_instance" "k3s_worker" {
   iam_instance_profile   = "EC2-S3-Role"
 
   root_block_device {
-    volume_size = 20
+    volume_size = 30
     volume_type = "gp3"
   }
 
