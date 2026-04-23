@@ -58,11 +58,9 @@ resource "aws_route_table_association" "public" {
 }
 
 # security group
-#checkov:skip=CKV_AWS_24:SSH exposure is user-controlled via var.my_ip and intentionally configurable for lab use.
-#checkov:skip=CKV_AWS_260:HTTP exposure is user-controlled via var.my_ip and intentionally configurable for lab use.
-#checkov:skip=CKV_AWS_382:Unrestricted egress is required for package/bootstrap operations.
 resource "aws_security_group" "k3s" {
   name_prefix = "k3s-demo-"
+  description = "Security group for k3s control plane and workers"
   vpc_id      = var.vpc_id
 
   ingress {

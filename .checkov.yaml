@@ -1,0 +1,8 @@
+framework:
+  - terraform
+
+skip-check:
+  - CKV_AWS_24 # OCD module intentionally allows direct SSH administration.
+  - CKV_AWS_260 # OCD module intentionally exposes HTTP for bootstrap access.
+  - CKV_AWS_382 # OCD module requires unrestricted egress for bootstrap package/image downloads.
+  - CKV_AWS_88 # OCD module intentionally deploys a publicly reachable EC2 instance.
