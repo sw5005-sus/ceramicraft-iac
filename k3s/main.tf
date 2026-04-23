@@ -33,7 +33,7 @@ resource "aws_subnet" "public" {
   vpc_id                  = var.vpc_id
   cidr_block              = "172.31.16.0/24"
   availability_zone       = local.az
-  map_public_ip_on_launch = false
+  map_public_ip_on_launch = true
   tags                    = { Name = "public-new" }
 }
 
