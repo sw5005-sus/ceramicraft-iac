@@ -89,10 +89,10 @@ resource "aws_security_group" "k3s" {
 
   # in-cluster communication
   ingress {
-    from_port = 0
-    to_port   = 0
-    protocol  = "-1"
-    self      = true
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
     description = "Intra-security group traffic"
   }
   # k3s API
