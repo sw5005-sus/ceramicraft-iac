@@ -15,6 +15,8 @@ data "aws_vpc" "default" {
   default = true
 }
 
+data "aws_partition" "current" {}
+
 data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
@@ -49,7 +51,7 @@ resource "aws_iam_role" "instance" {
 
 resource "aws_iam_role_policy_attachment" "instance_ssm" {
   role       = aws_iam_role.instance.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 resource "aws_iam_instance_profile" "instance" {
