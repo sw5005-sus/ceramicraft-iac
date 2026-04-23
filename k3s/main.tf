@@ -60,6 +60,7 @@ resource "aws_route_table_association" "public" {
 # security group
 resource "aws_security_group" "k3s" {
   name_prefix = "k3s-demo-"
+  description = "Security group for k3s control plane and workers"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -67,6 +68,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "SSH access"
   }
   # traefik HTTP port
   ingress {
@@ -74,6 +76,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "Traefik HTTP"
   }
   # traefik HTTPS port
   ingress {
@@ -81,14 +84,16 @@ resource "aws_security_group" "k3s" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "Traefik HTTPS"
   }
 
   # in-cluster communication
   ingress {
-    from_port = 0
-    to_port   = 0
-    protocol  = "-1"
-    self      = true
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
+    description = "Intra-security group traffic"
   }
   # k3s API
   ingress {
@@ -96,6 +101,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 6443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "k3s API"
   }
   # ArgoCD NodePort
   ingress {
@@ -103,6 +109,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 30080
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "ArgoCD NodePort"
   }
   # k3s UI (kubernetes-dashboard) NodePort
   ingress {
@@ -110,6 +117,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 30443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "Kubernetes dashboard NodePort"
   }
   # tailscale NodePort
   ingress {
@@ -117,6 +125,7 @@ resource "aws_security_group" "k3s" {
     to_port         = 41641
     protocol        = "udp"
     security_groups = [var.default_sg]
+    description     = "Tailscale UDP"
   }
 
   egress {
@@ -124,6 +133,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow outbound traffic"
   }
 }
 
@@ -147,6 +157,15 @@ resource "aws_instance" "k3s" {
   root_block_device {
     volume_size = 30
     volume_type = "gp3"
+    encrypted   = true
+  }
+
+  ebs_optimized = true
+  monitoring    = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
   }
 
   lifecycle {
@@ -172,6 +191,15 @@ resource "aws_instance" "k3s_worker" {
   root_block_device {
     volume_size = 30
     volume_type = "gp3"
+    encrypted   = true
+  }
+
+  ebs_optimized = true
+  monitoring    = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
   }
 
   tags = {
