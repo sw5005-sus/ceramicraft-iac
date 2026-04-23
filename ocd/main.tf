@@ -31,6 +31,9 @@ resource "aws_key_pair" "deployer" {
   public_key = file(var.public_key_path)
 }
 
+#checkov:skip=CKV_AWS_24:This module intentionally supports direct SSH administration for rapid one-click setup.
+#checkov:skip=CKV_AWS_260:This module intentionally exposes HTTP publicly for application access.
+#checkov:skip=CKV_AWS_382:Unrestricted outbound traffic is required for bootstrap package and image downloads.
 resource "aws_security_group" "instance" {
   name        = "${var.name}-sg"
   description = "Allow SSH and common HTTP ports"
@@ -65,11 +68,14 @@ resource "aws_security_group" "instance" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = merge({ Name = "${var.name}-sg" }, var.tags)
 }
 
+#checkov:skip=CKV_AWS_88:This module intentionally creates a publicly reachable instance for one-click deployment.
+#checkov:skip=CKV2_AWS_41:Attaching IAM roles is intentionally left to consuming environments.
 resource "aws_instance" "app" {
   ami                         = data.aws_ami.amazon_linux.id
   instance_type               = var.instance_type
@@ -84,6 +90,18 @@ resource "aws_instance" "app" {
     compose_path = var.compose_path
     repo_dir     = var.repo_dir
   })
+
+  root_block_device {
+    encrypted = true
+  }
+
+  ebs_optimized = true
+  monitoring    = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
 
   tags = merge({ Name = var.name }, var.tags)
 }

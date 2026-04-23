@@ -33,7 +33,7 @@ resource "aws_subnet" "public" {
   vpc_id                  = var.vpc_id
   cidr_block              = "172.31.16.0/24"
   availability_zone       = local.az
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags                    = { Name = "public-new" }
 }
 
@@ -58,6 +58,9 @@ resource "aws_route_table_association" "public" {
 }
 
 # security group
+#checkov:skip=CKV_AWS_24:SSH exposure is user-controlled via var.my_ip and intentionally configurable for lab use.
+#checkov:skip=CKV_AWS_260:HTTP exposure is user-controlled via var.my_ip and intentionally configurable for lab use.
+#checkov:skip=CKV_AWS_382:Unrestricted egress is required for package/bootstrap operations.
 resource "aws_security_group" "k3s" {
   name_prefix = "k3s-demo-"
   vpc_id      = var.vpc_id
@@ -67,6 +70,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "SSH access"
   }
   # traefik HTTP port
   ingress {
@@ -74,6 +78,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "Traefik HTTP"
   }
   # traefik HTTPS port
   ingress {
@@ -81,6 +86,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "Traefik HTTPS"
   }
 
   # in-cluster communication
@@ -89,6 +95,7 @@ resource "aws_security_group" "k3s" {
     to_port   = 0
     protocol  = "-1"
     self      = true
+    description = "Intra-security-group traffic"
   }
   # k3s API
   ingress {
@@ -96,6 +103,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 6443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "k3s API"
   }
   # ArgoCD NodePort
   ingress {
@@ -103,6 +111,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 30080
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "ArgoCD NodePort"
   }
   # k3s UI (kubernetes-dashboard) NodePort
   ingress {
@@ -110,6 +119,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 30443
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
+    description = "Kubernetes dashboard NodePort"
   }
   # tailscale NodePort
   ingress {
@@ -117,6 +127,7 @@ resource "aws_security_group" "k3s" {
     to_port         = 41641
     protocol        = "udp"
     security_groups = [var.default_sg]
+    description     = "Tailscale UDP"
   }
 
   egress {
@@ -124,6 +135,7 @@ resource "aws_security_group" "k3s" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow outbound traffic"
   }
 }
 
@@ -147,6 +159,15 @@ resource "aws_instance" "k3s" {
   root_block_device {
     volume_size = 30
     volume_type = "gp3"
+    encrypted   = true
+  }
+
+  ebs_optimized = true
+  monitoring    = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
   }
 
   lifecycle {
@@ -172,6 +193,15 @@ resource "aws_instance" "k3s_worker" {
   root_block_device {
     volume_size = 30
     volume_type = "gp3"
+    encrypted   = true
+  }
+
+  ebs_optimized = true
+  monitoring    = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
   }
 
   tags = {

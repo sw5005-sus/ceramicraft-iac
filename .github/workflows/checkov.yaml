@@ -1,0 +1,23 @@
+name: Checkov Scan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  checkov:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install Checkov
+        run: python -m pip install checkov
+
+      - name: Run Checkov scan
+        run: checkov -d . --framework terraform --quiet
